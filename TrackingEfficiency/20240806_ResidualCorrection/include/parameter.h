@@ -7,7 +7,7 @@ public:
     : MinZPT(MinZPT), MaxZPT(MaxZPT), MinTrackPT(MinTrackPT), MaxTrackPT(MaxTrackPT), MinHiBin(MinHiBin), MaxHiBin(MaxHiBin), mix(mix), scaleFactor(scaleFactor), nMix(nMix) {}
     string input;          // Input file name
     string output;         // Output file name
-    string mixFile;        // Mix File name
+    string residualFile;        // Mix File name
     float MinZPT;          // Lower limit of Z pt
     float MaxZPT;          // Upper limit of Z pt
     float MinZY;          // Lower limit of Z rapidity
@@ -23,7 +23,7 @@ public:
     bool mix;              // Mix flag
     int nMix;              // Number of mixed events
     TH1D *hShift;
-    bool isSelfMixing;     // isSelfMixing flag
+    bool isGen;     // isGen flag
     bool isGenZ;           // isGenZ flag
     bool isMuTagged;       // Flag to enable/disable muon tagging requirement
     bool isPUReject;       // Flag to reject PU sample for systemaitcs.
@@ -37,14 +37,14 @@ public:
    void printParameters() const {
        cout << "Input file: " << input << endl;
        cout << "Output file: " << output << endl;
-       cout << "Mix File: " << mixFile << endl;
+       cout << "Residla File: " << residualFile << endl;
        cout << "MinZPT: " << MinZPT << " GeV/c" << endl;
        cout << "MaxZPT: " << MaxZPT << " GeV/c" << endl;
        cout << "MinZY: " << MinZY << "" << endl;
        cout << "MaxZY: " << MaxZY << "" << endl;
        cout << "MinTrackPT: " << MinTrackPT << " GeV/c" << endl;
        cout << "MaxTrackPT: " << MaxTrackPT << " GeV/c" << endl;
-       cout << "isSelfMixing: " << (isSelfMixing ? "true" : "false") << endl;
+       cout << "isGen: " << (isGen ? "true" : "false") << endl;
        cout << "isGenZ: " << (isGenZ ? "true" : "false") << endl;
        cout << "isJewel: " << (isJewel ? "true" : "false") << endl;
        cout << "isPP: " << (isPP ? "true" : "false") << endl;
@@ -104,8 +104,8 @@ void saveParametersToHistograms(const Parameters& par, TFile* outf) {
     TH1D* hNMix = new TH1D("parNMix", "parNMix", 1, 0, 1);
     hNMix->SetBinContent(1, par.nMix);
     
-    TH1D* hIsSelfMixing = new TH1D("parIsSelfMixing", "parIsSelfMixing", 1, 0, 1);
-    hIsSelfMixing->SetBinContent(1, par.isSelfMixing);
+    TH1D* hisGen = new TH1D("parisGen", "parisGen", 1, 0, 1);
+    hisGen->SetBinContent(1, par.isGen);
     
     TH1D* hIsGenZ = new TH1D("parIsGenZ", "parIsGenZ", 1, 0, 1);
     hIsGenZ->SetBinContent(1, par.isGenZ);
@@ -144,7 +144,7 @@ void saveParametersToHistograms(const Parameters& par, TFile* outf) {
     hNThread->Write();
     hNChunk->Write();
     hNMix->Write();
-    hIsSelfMixing->Write();
+    hisGen->Write();
     hIsGenZ->Write();
     hIsMuTagged->Write();
     hIsPUReject->Write();
@@ -167,7 +167,7 @@ void saveParametersToHistograms(const Parameters& par, TFile* outf) {
     delete hNThread;
     delete hNChunk;
     delete hNMix;
-    delete hIsSelfMixing;
+    delete hisGen;
     delete hIsGenZ;
     delete hIsMuTagged;
     delete hIsPUReject;
