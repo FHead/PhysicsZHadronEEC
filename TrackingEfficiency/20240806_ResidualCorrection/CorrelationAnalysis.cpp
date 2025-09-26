@@ -11,22 +11,18 @@
 #include <iostream>
 
 using namespace std;
-#include "utilities.h"     // Yen-Jie's random utility functions
-#include "helpMessage.h"   // Print out help message
-#include "parameter.h"     // The parameters used in the analysis
-#include "Messenger.h"     // Yi's Messengers for reading data files
-#include "CommandLine.h"   // Yi's Commandline bundle
-#include "ProgressBar.h"   // Yi's fish progress bar
+#include "utilities.h"             // Yen-Jie's random utility functions
+#include "helpMessage.h"           // Print out help message
+#include "parameter.h"             // The parameters used in the analysis
+#include "Messenger.h"             // Yi's Messengers for reading data files
+#include "CommandLine.h"           // Yi's Commandline bundle
+#include "ProgressBar.h"           // Yi's fish progress bar
+#include "TrackResidualCorrector.h" // Residual correction
 
 //============================================================//
 // Function to check for configuration errors
 //============================================================//
 bool checkError(const Parameters& par) {
-    if (par.isSelfMixing && par.input != par.mixFile) {
-        std::cout << "Error! Self-mixing mode but assigned different input and mix files. Please check the macro." << std::endl;
-        return true;  // Return true indicates an error was found
-    }
-
     if (par.isHiBinUp && par.isHiBinDown) {
         std::cout << "Error! Cannot do hiBinUp and hiBinDown simultaneously!" << std::endl;
         return true;  // Return true indicates an error was found
@@ -48,6 +44,7 @@ bool eventSelection(ZHadronMessenger *b, const Parameters& par) {
    if (par.isPUReject && par.isPP && b->NVertex!=1) return 0;    // Only apply PU rejection (single vertex requirement) in pp analysis
    if (effectiveHiBin< par.MinHiBin) return 0;
    if (effectiveHiBin>=par.MaxHiBin) return 0;
+   /*
    if ((par.isGenZ ? b->genZMass->size() : b->zMass->size())==0) return 0;
    if ((par.isGenZ ? (*b->genZMass)[0] : (*b->zMass)[0])<60) return 0;
    if ((par.isGenZ ? (*b->genZMass)[0] : (*b->zMass)[0])>120) return 0;
@@ -55,6 +52,16 @@ bool eventSelection(ZHadronMessenger *b, const Parameters& par) {
    if (fabs((par.isGenZ ? (*b->genZY)[0] : (*b->zY)[0]))>=par.MaxZY) return 0;
    if ((par.isGenZ ? (*b->genZPt)[0] : (*b->zPt)[0])<par.MinZPT) return 0;
    if ((par.isGenZ ? (*b->genZPt)[0] : (*b->zPt)[0])>par.MaxZPT) return 0;
+   */
+   if (b->genZMass->size()==0   || b->zMass->size()==0) return 0;
+   if ((*b->genZMass)[0]<60 || (*b->zMass)[0]<60) return 0;
+   if ((*b->genZMass)[0]>120 || (*b->zMass)[0]>120) return 0;
+   if (fabs((*b->genZY)[0])<=par.MinZY || fabs((*b->zY)[0])<=par.MinZY) return 0;
+   if (fabs((*b->genZY)[0])>=par.MaxZY || fabs((*b->zY)[0])>=par.MaxZY) return 0;
+   if ((*b->genZPt)[0]<par.MinZPT || (*b->zPt)[0]<par.MinZPT) return 0;
+   if ((*b->genZPt)[0]>par.MaxZPT || (*b->zPt)[0]>par.MaxZPT) return 0;
+
+
    foundZ=1;   
    return foundZ;
 }
@@ -93,10 +100,12 @@ float get3D(ZHadronMessenger *MZSignal, TH3D *h, const Parameters& par) {
     Bar.SetStyle(1);
     unsigned long mix_i = iStart;
     unsigned long mixstart_i = mix_i;
-    int deltaI = (iEnd-iStart)/100+1;              
+    int deltaI = (iEnd-iStart)/100+1;
+    TrackResidualCorrector corrector(par.residualFile.c_str());              
 
     for (unsigned long i = iStart; i < iEnd; i++) {
        MZSignal->GetEntry(i);
+       
        if (i % deltaI == 0) {
           Bar.Update(i - iStart);
           Bar.Print();
@@ -106,13 +115,19 @@ float get3D(ZHadronMessenger *MZSignal, TH3D *h, const Parameters& par) {
           for (unsigned long j = 0; j < MZSignal->trackPhi->size(); j++) {
              if (!trackSelection(MZSignal, par, j)) continue;
              float trackPhi  = (*MZSignal->trackPhi)[j];
+             if (trackPhi<0) trackPhi+= 2 * M_PI;
              float trackEta  = (*MZSignal->trackEta)[j];
              float trackPt   = (*MZSignal->trackPt)[j];
-             float weight = (MZSignal->ZWeight*MZSignal->EventWeight);
-	     weight*= MZSignal->ExtraZWeight[par.ExtraZWeight];
-             weight*= (*MZSignal->trackWeight)[j]/(*MZSignal->trackResidualWeight)[j];
+             float residualCorrection = ((par.residualFile=="")||par.isGen==1)? 1 : corrector.GetCorrectionFactor(trackPt, trackEta, trackPhi);
+             float weight = 1; //MZSignal->EventWeight; //MZSignal->ZWeight: somehow the Z weight in gen and reco are different.
+	                 //weight*= MZSignal->ExtraZWeight[par.ExtraZWeight];
+                   weight*= (*MZSignal->trackWeight)[j]/(*MZSignal->trackResidualWeight)[j];
+                   weight*= residualCorrection;
+             //if (trackPt>20) cout <<"track pt: "<<trackPt<<" "<<residualCorrection<<endl;       
              h->Fill( trackPt, trackEta, trackPhi, weight);
           }
+          nZ++;
+
        }
     }
     return nZ;
@@ -120,7 +135,7 @@ float get3D(ZHadronMessenger *MZSignal, TH3D *h, const Parameters& par) {
 
 class DataAnalyzer {
 public:
-  DataAnalyzer(const char* filename, const char* mixFilename, const char* outFilename, const char *mytitle = "Data") :
+  DataAnalyzer(const char* filename, const char* residualFilename, const char* outFilename, const char *mytitle = "Data") :
      inf(new TFile(filename)), MZHadron(new ZHadronMessenger(*inf,string("Tree"))), title(mytitle), outf(new TFile(outFilename, "recreate"))  {
      outf->cd();
   }
@@ -128,22 +143,54 @@ public:
   ~DataAnalyzer() {
     deleteHistograms();
     inf->Close();
+    outf->Close();
+    delete MZHadron;
   }
 
   void analyze(Parameters& par) {
     // First histogram with mix=false
     par.mix = false;
-    h = new TH3D("h3D", "Histogram Title; p_{T} (GeV/c); #eta; #phi", 50,0,200,50,-2.4,2.4,50, 0,2*M_PI);
-    float n = get3D(MZHadron, h, par);
+    const int nbinsX = 25;
+    const double xMin = 1;
+    const double xMax = 70;
+    std::vector<double> binEdgesX(nbinsX + 1);
+    
+
+    for (int i = 0; i <= nbinsX; ++i) binEdgesX[i] = xMin * std::pow(xMax / xMin, double(i) / nbinsX);
+    binEdgesX[nbinsX]=200;
+
+    const int nbinsY = 50;
+    const double yMin = -2.4;
+    const double yMax = 2.4;
+    std::vector<double> binEdgesY(nbinsY + 1);
+
+    for (int i = 0; i <= nbinsY; ++i) binEdgesY[i] = yMin + (yMax - yMin) * i / nbinsY;
+
+    const int nbinsZ = 50;
+    const double zMin = 0;
+    const double zMax = 2 * M_PI;
+    std::vector<double> binEdgesZ(nbinsZ + 1);
+
+    for (int i = 0; i <= nbinsZ; ++i) binEdgesZ[i] = zMin + (zMax - zMin) * i / nbinsZ;
+
+    h = new TH3D("h3D", "Histogram Title; p_{T} (GeV/c); #eta; #phi",
+                     nbinsX, &binEdgesX[0],
+                     nbinsY, &binEdgesY[0],
+                     nbinsZ, &binEdgesZ[0]);
+    //    h = new TH3D("h3D", "Histogram Title; p_{T} (GeV/c); #eta; #phi", 50,0,10,50,-2.4,2.4,50, 0,2*M_PI);
+    hNZ = new TH1D("hNZ","",1,0,100);
+    hNZ->Fill(1, get3D(MZHadron, h, par));
   }
   
   void writeHistograms(TFile* outf) {
     outf->cd();
     smartWrite(h);
+    smartWrite(hNZ);
   }
 
-  TFile *inf, *mixFile, *mixFileClone, *outf;
+  TFile *inf, *residualFile, *residualFileClone, *outf;
   TH3D *h=0;
+  TH1D *hNZ=0;
   ZHadronMessenger *MZHadron;
   string title;
   
@@ -178,10 +225,10 @@ int main(int argc, char *argv[])
 
    Parameters par(MinZPT, MaxZPT, MinTrackPT, MaxTrackPT, MinHiBin, MaxHiBin);
    par.input         = CL.Get      ("Input",   "mergedSample/HISingleMuon-v5.root");            // Input file
-   par.mixFile       = CL.Get      ("MixFile", "mergedSample/HISingleMuon-v5.root");            // Input Mix file
+   par.residualFile  = CL.Get      ("residualFile", "");            // Input Mix file
    par.output        = CL.Get      ("Output",  "output.root");                             	// Output file
-   par.isSelfMixing  = CL.GetBool  ("IsSelfMixing", true); // Determine if the analysis is self-mixing
-   par.isGenZ        = CL.GetBool  ("IsGenZ", false);      // Determine if the analysis is using Gen level Z     
+   par.isGen         = CL.GetBool  ("IsGen", false); // Determine if the analysis is gen level
+   par.isGenZ        = CL.GetBool  ("IsGenZ", true);      // Determine if the analysis is using Gen level Z     
    par.isPUReject    = CL.GetBool  ("IsPUReject", true);  // Flag to reject PU sample for systemaitcs.
    par.isMuTagged    = CL.GetBool  ("IsMuTagged", true);   // Default is true
    par.isHiBinUp     = CL.GetBool  ("IsHiBinUp", false);   // Default is false
@@ -202,7 +249,7 @@ int main(int argc, char *argv[])
    if (checkError(par)) return -1;
           
    // Analyze Data
-   DataAnalyzer analyzer(par.input.c_str(), par.mixFile.c_str(), par.output.c_str(), "Data");
+   DataAnalyzer analyzer(par.input.c_str(), par.residualFile.c_str(), par.output.c_str(), "Data");
    analyzer.analyze(par);
    analyzer.writeHistograms(analyzer.outf);
    saveParametersToHistograms(par, analyzer.outf);
